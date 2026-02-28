@@ -6,13 +6,20 @@ const jwt = require('jsonwebtoken');
 const app = express();
 app.use(express.json());
 
+
+   app.get('/', (req, res) => {
+  res.send('API работает 🚀');
+});
+
+
+app.get('/', (req, res) => {
+    res.send('Mini Instagram API работает 🚀');
+});
+
+
 const SECRET_KEY = process.env.JWT_SECRET || "mini_insta_secret_2026";
 
-/*
-  🔥 ВАЖНО:
-  Если есть DATABASE_URL (Render) — используем его.
-  Если нет — подключаемся к локальной базе.
-*/
+
 
 const pool = process.env.DATABASE_URL
   ? new Pool({
@@ -26,6 +33,10 @@ const pool = process.env.DATABASE_URL
       password: process.env.DB_PASSWORD || '12345',
       port: process.env.DB_PORT || 5432,
     });
+
+
+
+ 
 
 /* ================= AUTH MIDDLEWARE ================= */
 
