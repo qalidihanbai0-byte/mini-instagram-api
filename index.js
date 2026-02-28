@@ -6,37 +6,28 @@ const jwt = require('jsonwebtoken');
 const app = express();
 app.use(express.json());
 
-
-   app.get('/', (req, res) => {
-  res.send('API работает 🚀');
-});
-
+/* ================= ROOT ROUTE ================= */
 
 app.get('/', (req, res) => {
     res.send('Mini Instagram API работает 🚀');
 });
 
+/* ================= CONFIG ================= */
 
 const SECRET_KEY = process.env.JWT_SECRET || "mini_insta_secret_2026";
 
-
-
 const pool = process.env.DATABASE_URL
-  ? new Pool({
-      connectionString: process.env.DATABASE_URL,
-      ssl: { rejectUnauthorized: false }, // обязательно для Render
+    ? new Pool({
+        connectionString: process.env.DATABASE_URL,
+        ssl: { rejectUnauthorized: false }
     })
-  : new Pool({
-      user: process.env.DB_USER || 'postgres',
-      host: process.env.DB_HOST || 'localhost',
-      database: process.env.DB_NAME || 'user_db',
-      password: process.env.DB_PASSWORD || '12345',
-      port: process.env.DB_PORT || 5432,
+    : new Pool({
+        user: process.env.DB_USER || 'postgres',
+        host: process.env.DB_HOST || 'localhost',
+        database: process.env.DB_NAME || 'user_db',
+        password: process.env.DB_PASSWORD || '12345',
+        port: process.env.DB_PORT || 5432,
     });
-
-
-
- 
 
 /* ================= AUTH MIDDLEWARE ================= */
 
@@ -44,10 +35,13 @@ const authenticateToken = (req, res, next) => {
     const authHeader = req.headers['authorization'];
     const token = authHeader && authHeader.split(' ')[1];
 
-    if (!token) return res.status(401).json({ error: "Токен қажет" });
+    if (!token)
+        return res.status(401).json({ error: "Токен қажет" });
 
     jwt.verify(token, SECRET_KEY, (err, user) => {
-        if (err) return res.status(403).json({ error: "Токен жарамсыз" });
+        if (err)
+            return res.status(403).json({ error: "Токен жарамсыз" });
+
         req.user = user;
         next();
     });
@@ -57,6 +51,7 @@ const authenticateToken = (req, res, next) => {
 
 app.post('/users', async (req, res, next) => {
     const { username, email, password_hash } = req.body;
+
     try {
         const result = await pool.query(
             `INSERT INTO users(username, email, password_hash)
@@ -64,6 +59,7 @@ app.post('/users', async (req, res, next) => {
              RETURNING id, username, email`,
             [username, email, password_hash]
         );
+
         res.status(201).json(result.rows[0]);
     } catch (err) {
         next(err);
@@ -72,6 +68,7 @@ app.post('/users', async (req, res, next) => {
 
 app.post('/login', async (req, res, next) => {
     const { email, password_hash } = req.body;
+
     try {
         const result = await pool.query(
             'SELECT id, password_hash FROM users WHERE email = $1',
@@ -84,6 +81,7 @@ app.post('/login', async (req, res, next) => {
             return res.status(401).json({ error: "Қате логин немесе пароль" });
 
         const token = jwt.sign({ id: user.id }, SECRET_KEY, { expiresIn: '2h' });
+
         res.json({ token });
     } catch (err) {
         next(err);
@@ -94,14 +92,13 @@ app.post('/login', async (req, res, next) => {
 
 app.post('/posts', authenticateToken, async (req, res, next) => {
     const { caption } = req.body;
-    const author_id = req.user.id;
 
     try {
         const result = await pool.query(
             `INSERT INTO posts(author_id, caption)
              VALUES($1, $2)
              RETURNING *`,
-            [author_id, caption]
+            [req.user.id, caption]
         );
 
         res.status(201).json(result.rows[0]);
@@ -145,9 +142,9 @@ app.patch('/posts/:id', authenticateToken, async (req, res, next) => {
 
     try {
         const result = await pool.query(
-            `UPDATE posts 
-             SET caption=$1 
-             WHERE id=$2 AND author_id=$3 
+            `UPDATE posts
+             SET caption=$1
+             WHERE id=$2 AND author_id=$3
              RETURNING *`,
             [caption, req.params.id, req.user.id]
         );
@@ -164,7 +161,7 @@ app.patch('/posts/:id', authenticateToken, async (req, res, next) => {
 app.delete('/posts/:id', authenticateToken, async (req, res, next) => {
     try {
         const result = await pool.query(
-            `DELETE FROM posts 
+            `DELETE FROM posts
              WHERE id=$1 AND author_id=$2`,
             [req.params.id, req.user.id]
         );
