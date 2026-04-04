@@ -4,24 +4,19 @@ const { Pool } = require('pg');
 const jwt = require('jsonwebtoken');
 
 const app = express();
+
+// Деректерді оқу үшін маңызды жолдар
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
 /* ================= CONFIG ================= */
 
 const SECRET_KEY = process.env.JWT_SECRET || "mini_insta_secret_2026";
 
-const pool = process.env.DATABASE_URL
-    ? new Pool({
-        connectionString: process.env.DATABASE_URL,
-        ssl: { rejectUnauthorized: false }
-    })
-    : new Pool({
-        user: process.env.DB_USER || 'postgres',
-        host: process.env.DB_HOST || 'localhost',
-        database: process.env.DB_NAME || 'user_db',
-        password: process.env.DB_PASSWORD || '12345',
-        port: process.env.DB_PORT || 5432,
-    });
+const pool = new Pool({
+    connectionString: process.env.DATABASE_URL,
+    ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false
+});
 
 /* ================= AUTH MIDDLEWARE ================= */
 
@@ -47,9 +42,14 @@ app.get('/', (req, res) => {
     res.send('Mini Instagram API работает 🚀');
 });
 
-/* ================= USERS ================= */
+/* ================= USERS (РЕГИСТРАЦИЯ) ================= */
 
 app.post('/users', async (req, res, next) => {
+    // req.body бар ма, тексереміз (Логтағы қатені осы түзейді)
+    if (!req.body || !req.body.username || !req.body.email || !req.body.password_hash) {
+        return res.status(400).json({ error: "Барлық өрістерді толтырыңыз (username, email, password_hash)" });
+    }
+
     const { username, email, password_hash } = req.body;
     try {
         const result = await pool.query(
@@ -59,10 +59,16 @@ app.post('/users', async (req, res, next) => {
             [username, email, password_hash]
         );
         res.status(201).json(result.rows[0]);
-    } catch (err) { next(err); }
+    } catch (err) { 
+        next(err); 
+    }
 });
 
 app.post('/login', async (req, res, next) => {
+    if (!req.body || !req.body.email || !req.body.password_hash) {
+        return res.status(400).json({ error: "Email мен парольді енгізіңіз" });
+    }
+
     const { email, password_hash } = req.body;
     try {
         const result = await pool.query(
@@ -73,7 +79,7 @@ app.post('/login', async (req, res, next) => {
         if (!user || user.password_hash !== password_hash)
             return res.status(401).json({ error: "Қате логин немесе пароль" });
 
-        const token = jwt.sign({ id: user.id }, SECRET_KEY, { expiresIn: '2h' });
+        const token = jwt.sign({ id: user.id }, SECRET_KEY, { expiresIn: '24h' });
         res.json({ token });
     } catch (err) { next(err); }
 });
@@ -83,7 +89,7 @@ app.post('/login', async (req, res, next) => {
 app.post('/notes', authenticateToken, async (req, res, next) => {
     const { content } = req.body;
     if (!content || content.length > 60) {
-        return res.status(400).json({ error: "Заметка должна быть до 60 символов" });
+        return res.status(400).json({ error: "Заметка 1-ден 60 символға дейін болуы керек" });
     }
     try {
         const result = await pool.query(
@@ -96,10 +102,23 @@ app.post('/notes', authenticateToken, async (req, res, next) => {
     } catch (err) { next(err); }
 });
 
+
+// ПОСТТАРДЫ АЛУ
+app.get('/posts', async (req, res) => {
+    try {
+        const result = await pool.query('SELECT * FROM posts ORDER BY created_at DESC');
+        res.json(result.rows);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 /* ================= STORIES (ИСТОРИИ) ================= */
 
 app.post('/stories', authenticateToken, async (req, res, next) => {
     const { image_url } = req.body;
+    if (!image_url) return res.status(400).json({ error: "Сурет сілтемесі қажет" });
+
     try {
         const result = await pool.query(
             'INSERT INTO stories (user_id, image_url) VALUES ($1, $2) RETURNING *',
@@ -109,11 +128,10 @@ app.post('/stories', authenticateToken, async (req, res, next) => {
     } catch (err) { next(err); }
 });
 
-/* ================= FEED (ДЛЯ ВИЗУАЛИЗАЦИИ) ================= */
+/* ================= FEED (ГЛАВНАЯ) ================= */
 
 app.get('/feed/extra', async (req, res, next) => {
     try {
-        // Получаем все заметки с именами пользователей
         const notes = await pool.query(`
             SELECT n.*, u.username 
             FROM notes n 
@@ -121,7 +139,6 @@ app.get('/feed/extra', async (req, res, next) => {
             ORDER BY n.created_at DESC
         `);
 
-        // Получаем истории только за последние 24 часа
         const stories = await pool.query(`
             SELECT s.*, u.username 
             FROM stories s 
@@ -144,7 +161,7 @@ app.post('/posts', authenticateToken, async (req, res, next) => {
     try {
         const result = await pool.query(
             `INSERT INTO posts(author_id, caption) VALUES($1, $2) RETURNING *`,
-            [req.user.id, caption]
+            [req.user.id, caption || ""]
         );
         res.status(201).json(result.rows[0]);
     } catch (err) { next(err); }
@@ -191,10 +208,13 @@ app.post('/posts/:id/like', authenticateToken, async (req, res, next) => {
 });
 
 app.post('/posts/:id/comments', authenticateToken, async (req, res, next) => {
+    const { text } = req.body;
+    if (!text) return res.status(400).json({ error: "Пікір жазуды ұмыттыңыз" });
+
     try {
         const result = await pool.query(
             `INSERT INTO comments(post_id, author_id, text) VALUES($1,$2,$3) RETURNING *`,
-            [req.params.id, req.user.id, req.body.text]
+            [req.params.id, req.user.id, text]
         );
         res.status(201).json(result.rows[0]);
     } catch (err) { next(err); }
